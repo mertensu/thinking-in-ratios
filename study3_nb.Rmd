@@ -1,0 +1,583 @@
+---
+title: "Study 3"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+---
+
+This file reproduces the preprocessing and analysis steps of Study 3. The data are automatically imported from Github and necessary packages will be downloaded and installed if they are not yet available. 
+
+
+```{r, echo=F,message=F,warning=F}
+rm(list=ls())
+if (!require("pacman"))
+  install.packages("pacman")
+required_packages = c(
+  "tidyverse",
+  "afex",
+  'brms',
+  'BayesFactor',
+  'emmeans',
+  'gridExtra'
+)
+pacman::p_load(required_packages,
+               update = F,
+               character.only = T
+)
+```
+
+```{r}
+sessionInfo()
+```
+
+
+## Import data
+
+
+```{r}
+df = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_study3.csv')
+```
+
+## Preprocessing
+
+
+
+```{r}
+# replace zero ratings with 0.001
+df[df$redness_rating == 0, 'redness_rating'] = 0.001
+# df = df[df$redness_rating!=0, ]
+
+
+# compute correct binary choice
+df = df %>% mutate(redness_correct = ifelse(saturation < 50, 0, 1))
+
+df$correct_response = NA
+df[df$condition == 'unidirectional', 'correct_response'] = df[df$condition == 'unidirectional', 'redness_correct'] == df[df$condition == 'unidirectional', 'redness_dichotom']
+
+# remove wrong binary choice(s) in unidirectional condition
+df = df %>% filter(!(correct_response == F &
+                       condition == 'unidirectional'))
+
+df[, "redness_rating_comparable"] = ifelse((df$condition == "unidirectional") &
+                                             (df$redness_dichotom == 0),
+                                           100 / df$redness_rating,
+                                           df$redness_rating
+)
+
+df$saturation_factor = factor(df$saturation, levels = c(15, 25, 35, 45, 55, 65, 75, 85))
+
+df$log_redness_rating = log(df$redness_rating_comparable)
+# divide saturation by 100 to enable more efficient sampling
+df$saturation = df$saturation/100
+df$redness_rating_comparable = df$redness_rating_comparable/100
+
+```
+
+
+## Demographics
+
+```{r}
+psych::describe(df$age)
+
+df %>% distinct(File, .keep_all = T) %>% group_by(gender) %>% summarise(
+  N = n(),
+  Min =
+    min(age),
+  Max =
+    max(age),
+  Mean =
+    mean(age),
+  Sd =
+    sd(age)
+)
+
+df %>% distinct(File, .keep_all = T) %>% count(student)
+df %>% distinct(File, .keep_all = T) %>% filter(student == 1) %>% count(psycho)
+
+df %>% distinct(File, .keep_all = T) %>% count(condition)
+```
+
+
+## Analysis
+
+### ANOVA I (mixed 2(method) x 8(saturation))
+
+#### frequentist fit
+
+```{r}
+
+(
+  fit = aov_ez(
+    dv = "log_redness_rating",
+    within = 'saturation_factor',
+    between = "condition",
+    id = "File",
+    data = df
+  )
+)
+```
+
+#### bayesian fit
+
+```{r}
+df$File = factor(df$File)
+df$condition = factor(df$condition)
+(
+  bfs = anovaBF(
+    log_redness_rating ~ saturation_factor * condition + File,
+    whichRandom = 'File',
+    whichModels = 'top',
+    data = df
+  )
+)
+
+# BF saturation_factor
+bf_1 = lmBF(log_redness_rating ~ condition + File,
+            whichRandom = 'File',
+            data = df)
+bf_2 = lmBF(
+  log_redness_rating ~ saturation_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_saturation_factor = bf_2 / bf_1)
+print(paste0('logBF ', bf_saturation_factor@bayesFactor$bf))
+
+# BF condition
+bf_1 = lmBF(
+  log_redness_rating ~ saturation_factor + File,
+  whichRandom = 'File',
+  data = df
+)
+bf_2 = lmBF(
+  log_redness_rating ~ saturation_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_condition = bf_2 / bf_1)
+print(paste0('logBF ', bf_condition@bayesFactor$bf))
+
+# BF interaction
+bf_1 = lmBF(
+  log_redness_rating ~ saturation_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+bf_2 = lmBF(
+  log_redness_rating ~ saturation_factor * condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_interaction = bf_2 / bf_1)
+print(paste0('logBF ', bf_interaction@bayesFactor$bf))
+```
+
+#### Figure 4
+
+```{r}
+grid = data.frame(emmeans(fit,  ~ saturation_factor + condition))
+
+ggplot(grid, aes(
+  x = saturation_factor,
+  y = exp(emmean),
+  group = condition
+)) +
+  geom_pointrange(aes(
+    ymin = exp(lower.CL),
+    ymax = exp(upper.CL),
+    color = condition
+  ), size =
+    0.3) +
+  scale_y_continuous(
+    trans = 'log2',
+    breaks = c(0.1, 1, 10, 100),
+    limits = c(0.07, 100)
+  ) +
+  geom_line(linetype = 'dashed') +
+  labs(y = 'Redness judgement', x = 'redness saturation (in %)') +
+  scale_color_manual(
+    values = c("darkgrey", "black"),
+    name = "method",
+    labels = c("unidirectional", "standard")
+  ) +
+  scale_x_discrete(labels = substring(grid$saturation_factor, 2)) +
+  theme_classic() +
+  theme(
+    legend.position = c(0.2, 0.85),
+    legend.background = element_rect(color = "black")
+  )
+```
+```{r}
+ggsave(
+  paste0("final_plots/study3_figure3.png"),
+  dpi = 600,
+  height = 4,
+  width = 5,
+  units = "in"
+)
+```
+
+
+### Bayesian mixed effects models (standard condition)
+
+
+#### Fit power law
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+                    set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+```{r}
+(formula = bf(
+      redness_rating_comparable ~ a * saturation ^ b ,
+      a ~ (1 | File),
+      b ~ (1 | File),
+      nl = TRUE
+    ))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'standard', ], prior = prior_settings)
+```
+
+
+```{r}
+(
+  power_law_standard <-
+    brm(
+      formula,
+      data = df[df$condition == 'standard',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 15),
+      prior = prior_settings,
+      file = 'study3_power_standard_x'
+    )
+)
+```
+
+```{r}
+(
+  pow_standard_plot = pp_check(power_law_standard) +
+    labs(title = 'Power law', y = 'Standard method') +
+    scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = c(0.9, 0.9)
+    )
+)
+```
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(power_law_standard)
+brms::waic(power_law_standard)
+brms::bridge_sampler(power_law_standard)
+```
+
+
+#### Fit linear model
+
+
+```{r}
+prior_settings = c(
+  set_prior('normal(0,1)', class = 'b', coef = 'saturation'),
+  set_prior('normal(0,5)', class = 'b', coef = 'Intercept')
+)
+```
+
+```{r}
+(formula = redness_rating_comparable ~ 0 + Intercept + saturation + (1 + saturation |File))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'standard', ], prior = prior_settings)
+```
+
+```{r}
+(linear_standard <-
+  brm(
+    formula,
+    data = df[df$condition == 'standard', ],
+    save_all_pars = T,
+    sample_prior = 'yes',
+    warmup = 2000,
+    cores = 4,
+    prior = prior_settings,
+    iter = 7000,
+    file = 'study3_linear_standard_x'))
+```
+
+```{r}
+(
+  lin_standard_plot = pp_check(linear_standard) + labs(title = 'Linear model') + 
+    scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = c(0.9, 0.9)
+  )
+)
+```
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(linear_standard)
+brms::waic(linear_standard)
+brms::bridge_sampler(linear_standard)
+```
+
+
+#### Model comparison (Bayes factors)
+
+Compute logBF in favor of power law. Takes a few minutes to run, hence commented out.
+
+```{r,message=F}
+bfs_standard = vector('numeric', length = 5)
+for (i in 1:5) {
+  bfs_standard[i] = log(1 / bayes_factor(linear_standard, power_law_standard)$bf)
+}
+print(paste0('Mean logBF:', mean(bfs_standard), 'Std logBF:', sd(bfs_standard)))
+```
+
+### Bayesian mixed effects models (unidirectional condition)
+
+
+#### Fit power law
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+                    set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+```{r}
+(formula = bf(
+      redness_rating_comparable ~ a * saturation ^ b ,
+      a ~ (1 | File),
+      b ~ (1 | File),
+      nl = TRUE
+    ))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'unidirectional', ], prior = prior_settings)
+```
+
+
+```{r}
+(
+  power_law_unidirectional <-
+    brm(
+      formula,
+      data = df[df$condition == 'unidirectional',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 15),
+      prior = prior_settings,
+      file = 'study3_power_unidirectional_x'
+    )
+)
+```
+
+```{r}
+(
+  pow_unidirectional_plot = pp_check(power_law_unidirectional) +
+    scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    labs(y = 'Unidirectional method') +
+    theme(legend.position = c(0.9, 0.9))
+) 
+```
+
+
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(power_law_unidirectional)
+brms::waic(power_law_unidirectional)
+brms::bridge_sampler(power_law_unidirectional)
+```
+
+#### Fit linear model
+
+```{r}
+prior_settings = c(
+  set_prior('normal(0,1)', class = 'b', coef = 'saturation'),
+  set_prior('normal(0,5)', class = 'b', coef = 'Intercept')
+)
+```
+
+```{r}
+(formula = redness_rating_comparable ~ 0 + Intercept + saturation + (1 + saturation |File))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'unidirectional', ], prior = prior_settings)
+```
+
+```{r}
+(
+  linear_unidirectional <-
+    brm(
+      formula,
+      data = df[df$condition == 'unidirectional',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      cores = 4,
+      prior = prior_settings,
+      iter = 7000,
+      file = 'study3_linear_unidirectional_x'
+    )
+)
+```
+
+```{r}
+(lin_unidirectional_plot = pp_check(linear_unidirectional) +
+   scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+   theme(legend.position = c(0.9, 0.9)))
+```
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(linear_unidirectional)
+brms::waic(linear_unidirectional)
+brms::bridge_sampler(linear_unidirectional)
+```
+
+
+#### Model comparison (Bayes factors)
+
+Compute logBF in favor of power law. Takes a few minutes to run, hence commented out.
+
+```{r,message=F}
+bfs_unidirectional = vector('numeric', length = 5)
+for (i in 1:5) {
+  bfs_unidirectional[i] = log(1 / bayes_factor(linear_unidirectional, power_law_unidirectional)$bf)
+}
+print(paste0('Mean logBF:', mean(bfs_unidirectional), 'Std logBF:', sd(bfs_unidirectional)))
+```
+
+
+
+#### Posterior predictive plot (Figure 5)
+
+```{r}
+pp_grid = (
+  grid.arrange(
+    pow_standard_plot,
+    lin_standard_plot,
+    pow_unidirectional_plot,
+    lin_unidirectional_plot
+  )
+)
+```
+
+
+```{r}
+ggsave(
+  paste0("final_plots/study3_pp_plot.png"),
+  plot = pp_grid,
+  dpi = 600,
+  height = 6,
+  width = 7,
+  units = "in"
+)
+```
+
+
+
+### Bayesian mixed-effects models (aggregated data)
+
+#### Fit power law (standard condition)
+
+
+```{r}
+df_agg = df %>% group_by(saturation,condition) %>% summarise(median_rating = median(redness_rating_comparable))
+
+```
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+            set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+
+```{r}
+(formula = bf(median_rating ~ a * saturation ^ b , a ~ 1, b ~ 1 , nl = TRUE))
+```
+
+
+```{r}
+# make_stancode(formula, data = df_agg[df_agg$condition == 'standard', ], prior = prior_settings)
+
+```
+
+
+```{r}
+(
+  power_law_standard_agg <-
+    brm(
+      formula,
+      data = df_agg[df_agg$condition == 'standard',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 20),
+      prior = prior_settings,
+      file = 'study3_power_standard_agg_x'
+    )
+)
+```
+
+#### Fit power law (unidirectional condition)
+
+
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+            set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+
+```{r}
+(formula = bf(median_rating ~ a * saturation ^ b , a ~ 1, b ~ 1 , nl = TRUE))
+```
+
+
+```{r}
+# make_stancode(formula, data = df_agg[df_agg$condition == 'unidirectional', ], prior = prior_settings)
+
+```
+
+
+
+```{r}
+(
+  power_law_unidirectional_agg <-
+    brm(
+      formula,
+      data = df_agg[df_agg$condition == 'unidirectional',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 20),
+      prior = prior_settings,
+      file = 'study3_power_unidirectional_agg_x'
+    )
+)
+```

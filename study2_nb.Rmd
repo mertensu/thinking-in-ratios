@@ -1,0 +1,700 @@
+---
+title: "Study 2"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+---
+
+This file reproduces the preprocessing and analysis steps of Study 2. The data are automatically imported from Github and necessary packages will be downloaded and installed if they are not yet available. 
+
+
+```{r, message=F,warning=F}
+rm(list=ls())
+if (!require("pacman"))
+  install.packages("pacman")
+required_packages = c(
+  "tidyverse",
+  "afex",
+  'brms',
+  'BayesFactor',
+  'emmeans',
+  'gridExtra'
+)
+pacman::p_load(required_packages,
+               update = F,
+               character.only = T
+)
+```
+
+```{r}
+sessionInfo()
+```
+
+
+## Import data
+
+
+```{r}
+df = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_study2.csv')
+```
+
+## Preprocessing
+
+```{r}
+# replace zero ratings with 0.001
+df[df$brightness_rating==0,'brightness_rating'] = 0.001
+# df = df[df$brightness_rating!=0, ]
+
+
+# compute correct binary choice
+df = df %>% mutate(brightness_dichotom_correct = ifelse(cd < 10, 0, 1))
+
+df$correct_response = NA
+df[df$condition == 'unidirectional', 'correct_response'] = df[df$condition == 'unidirectional', 'brightness_dichotom_correct'] == df[df$condition == 'unidirectional', 'brightness_dichotom']
+
+# remove wrong binary choice(s) in unidirectional condition
+df = df %>% filter(!(correct_response == F &
+                       condition == 'unidirectional'))
+
+df[, "brightness_rating_stevens"] = ifelse((df$condition == "unidirectional") &
+                                             (df$brightness_dichotom_correct == 0),
+                                           100 / df$brightness_rating,
+                                           df$brightness_rating
+)
+df[, "brightness_rating"] = ifelse((df$condition == "standard") &
+                                     (df$brightness_dichotom_correct == 0),
+                                   10 * (10 / df$brightness_rating),
+                                   df$brightness_rating
+)
+
+df$log_brightness_rating = log(df$brightness_rating_stevens)
+
+df$cd_factor = factor(df$cd, levels = c(1, 1.8, 3.2, 5.7, 17.9, 32.0, 57.2, 100.0))
+
+df$brightness_rating_stevens = df$brightness_rating_stevens/100
+df$cd = df$cd/100
+```
+
+
+## Demographics
+
+```{r}
+psych::describe(df$age)
+
+df %>% distinct(File, .keep_all = T) %>% group_by(gender) %>% summarise(
+  N = n(),
+  Min =
+    min(age),
+  Max =
+    max(age),
+  Mean =
+    mean(age),
+  Sd =
+    sd(age)
+)
+
+df %>% distinct(File, .keep_all = T) %>% count(student)
+df %>% distinct(File, .keep_all = T) %>% filter(student == 1) %>% count(psycho)
+
+df %>% distinct(File, .keep_all = T) %>% count(condition)
+```
+
+## Analysis
+
+### ANOVA I (mixed 2(method) x 8(luminance))
+
+#### frequentist fit
+
+```{r}
+(
+  fit = aov_ez(
+    dv = "log_brightness_rating",
+    within = 'cd_factor',
+    between = "condition",
+    id = "File",
+    data = df
+  )
+)
+```
+
+#### bayesian fit
+
+```{r}
+df$File = factor(df$File)
+df$condition = factor(df$condition)
+bfs = anovaBF(
+  log_brightness_rating ~ cd_factor * condition + File,
+  whichRandom = 'File',
+  whichModels = 'top',
+  data = df
+)
+
+# BF cd_factor
+bf_1 = lmBF(log_brightness_rating ~ condition + File,
+            whichRandom = 'File',
+            data = df)
+bf_2 = lmBF(
+  log_brightness_rating ~ cd_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_cd_factor = bf_2 / bf_1)
+print(paste0('logBF ', bf_cd_factor@bayesFactor$bf))
+
+# BF condition
+bf_1 = lmBF(log_brightness_rating ~ cd_factor + File,
+            whichRandom = 'File',
+            data = df)
+bf_2 = lmBF(
+  log_brightness_rating ~ cd_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_condition = bf_2 / bf_1)
+print(paste0('logBF ', bf_condition@bayesFactor$bf))
+
+# BF interaction
+bf_1 = lmBF(
+  log_brightness_rating ~ cd_factor + condition + File,
+  whichRandom = 'File',
+  data = df
+)
+bf_2 = lmBF(
+  log_brightness_rating ~ cd_factor * condition + File,
+  whichRandom = 'File',
+  data = df
+)
+(bf_interaction = bf_2 / bf_1)
+print(paste0('logBF ', bf_interaction@bayesFactor$bf))
+```
+
+#### Figure 2
+
+```{r}
+scaleFUN <- function(x)
+  sprintf("%.1f", x)
+
+grid = data.frame(emmeans(fit,  ~ cd_factor + condition))
+
+ggplot(grid, aes(
+  x = cd_factor,
+  y = exp(emmean),
+  group = condition
+)) +
+  geom_pointrange(aes(
+    ymin = exp(lower.CL),
+    ymax = exp(upper.CL),
+    color = condition
+  ), size =
+    0.3) +
+  scale_y_continuous(
+    trans = 'log2',
+    breaks = c(1.0, 10.0, 100.0),
+    limits = c(1.0, 100.0),
+    labels = scaleFUN
+  ) +
+  geom_line(linetype = 'dashed') +
+  labs(y = 'Brightness judgement') +
+  xlab(expression(paste("cd/", m ^ 2, sep = ""))) +
+  scale_color_manual(
+    values = c("darkgrey", "black"),
+    name = "method",
+    labels = c("unidirectional", "standard")
+  ) +
+  scale_x_discrete(labels = substring(grid$cd_factor, 2)) +
+  theme_classic() +
+  theme(
+    legend.position = c(0.2, 0.8),
+    legend.background = element_rect(color = "black")
+  )
+```
+
+```{r}
+ggsave(
+  paste0("final_plots/study2_figure2.png"),
+  dpi = 600,
+  height = 4,
+  width = 5,
+  units = "in"
+)
+```
+
+
+
+### Bayesian mixed effects models (standard condition)
+
+#### Fit power law
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+                    set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+```{r}
+(formula = bf(brightness_rating_stevens ~ a * cd ^ b, a ~ (1 |File), b ~ (1 | File), nl = TRUE))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'standard', ], prior = prior_settings)
+```
+
+
+```{r}
+(power_law_standard <-
+  brm(formula,
+    data = df[df$condition == 'standard', ],
+    save_all_pars = T,
+    sample_prior = 'yes',
+    warmup = 2000,
+    iter = 7000,
+    cores = 4,
+    control = list(adapt_delta = 0.96, max_treedepth = 20),
+    prior = prior_settings,
+    file = 'study2_power_standard_x'))
+```
+
+```{r}
+(
+  pow_standard_plot = pp_check(power_law_standard) +
+    labs(title = 'Power law', y = 'Standard method') +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100)) +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = c(0.85, 0.85),
+    ) 
+)
+```
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(power_law_standard)
+brms::waic(power_law_standard)
+brms::bridge_sampler(power_law_standard)
+```
+
+
+#### Fit linear model
+
+```{r}
+prior_settings <-
+  c(
+    set_prior('normal(0,1)', class = 'b', coef = 'cd'),
+    set_prior('normal(0,5)', class = 'b', coef = 'Intercept')
+  )
+```
+
+```{r}
+(formula = brightness_rating_stevens ~ 0 + Intercept + cd + (1 + cd | File))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'standard', ], prior = prior_settings)
+```
+
+```{r}
+(linear_standard <-
+  brm(
+    formula,
+    data = df[df$condition == 'standard', ],
+    save_all_pars = T,
+    sample_prior = 'yes',
+    warmup = 2000,
+    cores = 4,
+    prior = prior_settings,
+    iter = 7000,
+    file = 'study2_linear_standard_x'))
+```
+
+```{r}
+(
+  lin_standard_plot = pp_check(linear_standard) + labs(title = 'Linear model') +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100)) +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = c(0.85, 0.85),
+    )
+)
+```
+
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(linear_standard)
+brms::waic(linear_standard)
+brms::bridge_sampler(linear_standard)
+```
+
+
+#### Model comparison (Bayes factors)
+
+Compute logBF in favor of power law. Takes a few minutes to run, hence commented out.
+
+```{r,message=F}
+bfs_standard = vector('numeric', length = 5)
+for (i in 1:5) {
+  bfs_standard[i] = log(1 / bayes_factor(linear_standard, power_law_standard)$bf)
+}
+print(paste0('Mean logBF:', mean(bfs_standard), 'Std logBF:', sd(bfs_standard)))
+```
+
+
+
+### Bayesian mixed-effects models (unidirectional condition)
+
+#### Fit power law
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+                    set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0)
+                    )
+```
+
+```{r}
+(formula = bf(brightness_rating_stevens ~ a * cd ^ b, a ~ (1 |File), b ~ (1 | File),  nl = TRUE))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'unidirectional', ], prior = prior_settings)
+```
+
+
+```{r}
+(power_law_unidirectional <-
+  brm(formula,
+    data = df[df$condition == 'unidirectional', ],
+    save_all_pars = T,
+    sample_prior = 'yes',
+    warmup = 2000,
+    iter = 7000,
+    cores = 4,
+    control = list(adapt_delta = 0.96, max_treedepth = 20),
+    prior = prior_settings,
+    file = 'study2_power_unidirectional_x'))
+```
+
+
+```{r}
+(
+  pow_unidirectional_plot = pp_check(power_law_unidirectional) +
+    labs(y = 'Unidirectional method') +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100), breaks=c(0,0.25,0.5,0.75,1)) +
+    theme(legend.position = c(0.85, 0.85))
+) 
+```
+
+
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(power_law_unidirectional)
+brms::waic(power_law_unidirectional)
+brms::bridge_sampler(power_law_unidirectional)
+```
+
+#### Fit linear model
+
+```{r}
+prior_settings <-
+  c(
+    set_prior('normal(0,1)', class = 'b', coef = 'cd'),
+    set_prior('normal(0,5)', class = 'b', coef = 'Intercept')
+  )
+```
+
+```{r}
+(formula = brightness_rating_stevens ~ 0 + Intercept + cd + (1 + cd | File))
+```
+
+```{r}
+# make_stancode(formula, data = df[df$condition == 'unidirectional', ], prior = prior_settings)
+```
+
+```{r}
+(linear_unidirectional <-
+  brm(
+    formula,
+    data = df[df$condition == 'unidirectional', ],
+    save_all_pars = T,
+    sample_prior = 'yes',
+    warmup = 2000,
+    cores = 4,
+    prior = prior_settings,
+    iter = 7000,
+    file = 'study2_linear_unidirectional_x'))
+```
+
+```{r}
+(
+  lin_unidirectional_plot = pp_check(linear_unidirectional) +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100), breaks=c(0,0.25,0.5,0.75,1)) +
+    theme(legend.position = c(0.85, 0.85))
+)
+```
+
+#### Model metrics (LOOCV, WAIC, marginal likelihood)
+
+```{r}
+brms::loo(linear_unidirectional)
+brms::waic(linear_unidirectional)
+brms::bridge_sampler(linear_unidirectional)
+```
+
+#### Model comparison (Bayes factors)
+
+Compute logBF in favor of power law. Takes a few minutes to run, hence commented out.
+
+```{r,message=F}
+bfs_unidirectional = vector('numeric', length = 5)
+for (i in 1:5) {
+  bfs_unidirectional[i] = log(1 / bayes_factor(linear_unidirectional, power_law_unidirectional)$bf)
+}
+print(paste0('Mean logBF:', mean(bfs_unidirectional), 'Std logBF:', sd(bfs_unidirectional)))
+```
+
+#### Posterior predictive plot (Figure 3)
+
+```{r}
+pp_grid = (
+  grid.arrange(
+    pow_standard_plot,
+    lin_standard_plot,
+    pow_unidirectional_plot,
+    lin_unidirectional_plot
+  )
+)
+```
+
+```{r}
+ggsave(
+  paste0("final_plots/study2_pp_plot.png"),
+  plot = pp_grid,
+  dpi = 600,
+  height = 6,
+  width = 7,
+  units = "in"
+)
+```
+
+
+### Bayesian mixed-effects models (aggregated data)
+
+#### Fit power law (standard condition)
+
+
+```{r}
+df_agg = df %>% group_by(cd,condition) %>% summarise(median_rating = median(brightness_rating_stevens))
+
+```
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+            set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+
+```{r}
+(formula = bf(median_rating ~ a * cd ^ b , a ~ 1, b ~ 1 , nl = TRUE))
+```
+
+
+```{r}
+# make_stancode(formula, data = df_agg[df_agg$condition == 'standard', ], prior = prior_settings)
+```
+
+
+```{r}
+(
+  power_law_standard_agg <-
+    brm(
+      formula,
+      data = df_agg[df_agg$condition == 'standard',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 20),
+      prior = prior_settings,
+      file = 'study2_power_standard_agg_x'
+    )
+)
+```
+
+#### Fit power law on aggregated data (unidirectional condition)
+
+
+```{r}
+prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
+            set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+
+```{r}
+(formula = bf(median_rating ~ a * cd ^ b , a ~ 1, b ~ 1 , nl = TRUE))
+```
+
+
+```{r}
+# make_stancode(formula, data = df_agg[df_agg$condition == 'unidirectional', ], prior = prior_settings)
+```
+
+
+```{r}
+(
+  power_law_unidirectional_agg <-
+    brm(
+      formula,
+      data = df_agg[df_agg$condition == 'unidirectional',],
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 20),
+      prior = prior_settings,
+      file = 'study2_power_unidirectional_agg_x'
+    )
+)
+```
+
+
+## Supplemental analysis
+
+```{r}
+df_supp = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_supp.csv')
+```
+
+
+
+```{r}
+df_supp[df_supp$brightness_rating == 0, 'brightness_rating'] = 0.001
+
+df_supp = df_supp %>% mutate(brightness_dichotom_correct = ifelse(cd < 10, 0, 1))
+
+
+df_supp$correct_response = NA
+df_supp[,'correct_response'] = df_supp['brightness_dichotom_correct'] == df_supp[, 'brightness_dichotom']
+
+df_supp$cd_factor = factor(df_supp$cd, levels = c(1, 1.8, 3.2, 5.7, 17.9, 32.0, 57.2, 100.0))
+
+
+# use same column name as in Study 2
+df_supp$brightness_rating_stevens = df_supp$brightness_rating
+df_supp$log_brightness_rating = log(df_supp$brightness_rating_stevens)
+
+df_supp$brightness_rating_stevens = df_supp$brightness_rating_stevens/100
+df_supp$cd = df_supp$cd/100
+```
+
+
+
+```{r}
+psych::describe(df_supp$age)
+
+df_supp %>% distinct(File, .keep_all = T) %>% group_by(gender) %>% summarise(
+  N = n(),
+  Min =
+    min(age),
+  Max =
+    max(age),
+  Mean =
+    mean(age),
+  Sd =
+    sd(age)
+)
+
+df_supp %>% distinct(File, .keep_all = T) %>% count(student)
+df_supp %>% distinct(File, .keep_all = T) %>% filter(student == 1) %>% count(psycho)
+
+df_supp %>% distinct(File, .keep_all = T) %>% count(condition)
+```
+
+
+
+```{r}
+df_s2 = df
+df_s2$File = paste0(df_s2$File,'study2')
+df_tot = rbind(df_supp,df_s2)
+df_tot = df_tot %>% filter(condition != 'unidirectional')
+```
+
+
+```{r}
+(
+  fit = aov_ez(
+    dv = "log_brightness_rating",
+    within = 'cd_factor',
+    between = "condition",
+    id = "File",
+    data = df_tot
+  )
+)
+```
+
+
+```{r}
+df_tot$File = factor(df_tot$File)
+df_tot$condition = factor(df_tot$condition)
+bfs = anovaBF(log_brightness_rating ~ cd_factor * condition + File, 
+              whichRandom = 'File',whichModels = 'top',data=df_tot)
+
+# BF cd_factor
+bf_1 = lmBF(log_brightness_rating ~ condition + File, whichRandom = 'File',data=df_tot)
+bf_2 = lmBF(log_brightness_rating ~ cd_factor + condition + File, whichRandom = 'File',data=df_tot)
+(bf_cd_factor = bf_2 / bf_1)
+print(paste0('logBF ', bf_cd_factor@bayesFactor$bf))
+
+# BF condition
+bf_1 = lmBF(log_brightness_rating ~ cd_factor + File, whichRandom = 'File',data=df_tot)
+bf_2 = lmBF(log_brightness_rating ~ cd_factor + condition + File, whichRandom = 'File',data=df_tot)
+(bf_condition = bf_2 / bf_1)
+print(paste0('logBF ', bf_condition@bayesFactor$bf))
+
+# BF interaction
+bf_1 = lmBF(log_brightness_rating ~ cd_factor + condition + File, whichRandom = 'File',data=df_tot)
+bf_2 = lmBF(log_brightness_rating ~ cd_factor * condition + File, whichRandom = 'File',data=df_tot)
+(bf_int = bf_2 / bf_1)
+print(paste0('logBF ', bf_int@bayesFactor$bf))
+```
+
+
+####  Fit power law
+
+```{r}
+prior_settings <-
+  c(set_prior('normal(0, 5)', nlpar = "a"),
+    set_prior('normal(1.0, 0.5)', nlpar = "b", lb = 0))
+```
+
+
+```{r}
+(formula = bf(brightness_rating_stevens ~ a * cd ^ b , a ~ (1 |File), b ~ (1 | File), nl = TRUE))
+```
+
+```{r}
+# make_stancode(formula, data = df_supp, prior = prior_settings)
+```
+
+
+```{r}
+(
+  power_law_supp <-
+    brm(
+      formula,
+      data = df_supp,
+      save_all_pars = T,
+      sample_prior = 'yes',
+      warmup = 2000,
+      iter = 7000,
+      cores = 4,
+      control = list(adapt_delta = 0.96, max_treedepth = 20),
+      prior = prior_settings,
+      file = 'power_binary_standard'
+    )
+)
+```
+
