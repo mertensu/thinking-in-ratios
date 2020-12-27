@@ -1,12 +1,20 @@
 ---
 title: "Study 2"
 output:
+  pdf_document:
+    toc: yes
   html_document:
     df_print: paged
     toc: yes
 ---
 
 This file reproduces the preprocessing and analysis steps of Study 2. The data are automatically imported from Github and necessary packages will be downloaded and installed if they are not yet available. 
+
+Create directory to save plots:
+
+```{r}
+if (!dir.exists('final_plots')) {dir.create('final_plots')}
+```
 
 
 ```{r, message=F,warning=F}
@@ -28,6 +36,10 @@ pacman::p_load(required_packages,
 ```
 
 ```{r}
+set.seed(42)
+```
+
+```{r}
 sessionInfo()
 ```
 
@@ -36,15 +48,16 @@ sessionInfo()
 
 
 ```{r}
-df = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_study2.csv')
+github_link = 'https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/'
+file_name = 'data_total_study2.csv' 
+df = read.csv(paste0(github_link, file_name))
 ```
 
 ## Preprocessing
 
 ```{r}
 # replace zero ratings with 0.001
-df[df$brightness_rating==0,'brightness_rating'] = 0.001
-# df = df[df$brightness_rating!=0, ]
+df[df$brightness_rating == 0, 'brightness_rating'] = 0.001
 
 
 # compute correct binary choice
@@ -57,23 +70,19 @@ df[df$condition == 'unidirectional', 'correct_response'] = df[df$condition == 'u
 df = df %>% filter(!(correct_response == F &
                        condition == 'unidirectional'))
 
-df[, "brightness_rating_stevens"] = ifelse((df$condition == "unidirectional") &
-                                             (df$brightness_dichotom_correct == 0),
-                                           100 / df$brightness_rating,
-                                           df$brightness_rating
-)
-df[, "brightness_rating"] = ifelse((df$condition == "standard") &
-                                     (df$brightness_dichotom_correct == 0),
-                                   10 * (10 / df$brightness_rating),
-                                   df$brightness_rating
+df[, "brightness_rating_stevens"] = ifelse(
+  (df$condition == "unidirectional") &
+    (df$brightness_dichotom_correct == 0),
+  100 / df$brightness_rating,
+  df$brightness_rating
 )
 
 df$log_brightness_rating = log(df$brightness_rating_stevens)
 
 df$cd_factor = factor(df$cd, levels = c(1, 1.8, 3.2, 5.7, 17.9, 32.0, 57.2, 100.0))
 
-df$brightness_rating_stevens = df$brightness_rating_stevens/100
-df$cd = df$cd/100
+df$brightness_rating_stevens = df$brightness_rating_stevens / 100
+df$cd = df$cd / 100
 ```
 
 
@@ -254,11 +263,14 @@ prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
     file = 'study2_power_standard_x'))
 ```
 
+
+
 ```{r}
 (
   pow_standard_plot = pp_check(power_law_standard) +
     labs(title = 'Power law', y = 'Standard method') +
-    scale_x_continuous(labels = c(0, 25, 50, 75, 100)) +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100), limits=c(NA,1.1)) +
+    scale_y_continuous(limits=c(0,8)) + 
     theme(
       plot.title = element_text(hjust = 0.5),
       legend.position = c(0.85, 0.85),
@@ -310,7 +322,8 @@ prior_settings <-
 ```{r}
 (
   lin_standard_plot = pp_check(linear_standard) + labs(title = 'Linear model') +
-    scale_x_continuous(labels = c(0, 25, 50, 75, 100)) +
+    scale_x_continuous(labels = c(0, 25, 50, 75, 100), limits=c(NA,1.1)) +
+    scale_y_continuous(limits=c(0,8)) + 
     theme(
       plot.title = element_text(hjust = 0.5),
       legend.position = c(0.85, 0.85),
@@ -380,7 +393,12 @@ prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
 (
   pow_unidirectional_plot = pp_check(power_law_unidirectional) +
     labs(y = 'Unidirectional method') +
-    scale_x_continuous(labels = c(0, 25, 50, 75, 100), breaks=c(0,0.25,0.5,0.75,1)) +
+    scale_x_continuous(
+      labels = c(0, 25, 50, 75, 100),
+      breaks = c(0, 0.25, 0.5, 0.75, 1),
+      limits = c(NA, 1.1)
+    ) +
+    scale_y_continuous(limits = c(0, 8)) +
     theme(legend.position = c(0.85, 0.85))
 ) 
 ```
@@ -430,7 +448,12 @@ prior_settings <-
 ```{r}
 (
   lin_unidirectional_plot = pp_check(linear_unidirectional) +
-    scale_x_continuous(labels = c(0, 25, 50, 75, 100), breaks=c(0,0.25,0.5,0.75,1)) +
+    scale_x_continuous(
+      labels = c(0, 25, 50, 75, 100),
+      breaks = c(0, 0.25, 0.5, 0.75, 1),
+      limits = c(NA, 1.1)
+    ) +
+    scale_y_continuous(limits = c(0, 8)) +
     theme(legend.position = c(0.85, 0.85))
 )
 ```
@@ -565,7 +588,9 @@ prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
 ## Supplemental analysis
 
 ```{r}
-df_supp = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_supp.csv')
+github_link = 'https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/'
+file_name = 'data_total_supp.csv' 
+df_supp = read.csv(paste0(github_link, file_name))
 ```
 
 

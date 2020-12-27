@@ -1,11 +1,18 @@
 ---
 title: "Study 1"
 output:
-  word_document: default
   pdf_document: default
+  word_document: default
 ---
 
 This file reproduces the preprocessing and analysis steps of Study 1. The data are automatically imported from Github and necessary packages will be downloaded and installed if they are not yet available. 
+
+
+Create directory to save plots:
+
+```{r}
+if (!dir.exists('final_plots')) {dir.create('final_plots')}
+```
 
 
 ```{r,echo=F,message=F,warning=F}
@@ -25,6 +32,10 @@ pacman::p_load(required_packages,
                character.only = T)
 ```
 
+```{r}
+set.seed(42)
+```
+
 
 ```{r}
 sessionInfo()
@@ -34,7 +45,9 @@ sessionInfo()
 
 
 ```{r}
-df = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_study1.csv')
+github_link = 'https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/'
+file_name = 'data_total_study1.csv' 
+df = read.csv(paste0(github_link, file_name))
 ```
 
 

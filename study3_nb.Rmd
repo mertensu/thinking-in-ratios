@@ -1,12 +1,21 @@
 ---
 title: "Study 3"
 output:
+  pdf_document:
+    toc: yes
   html_document:
     df_print: paged
     toc: yes
 ---
 
 This file reproduces the preprocessing and analysis steps of Study 3. The data are automatically imported from Github and necessary packages will be downloaded and installed if they are not yet available. 
+
+
+Create directory to save plots:
+
+```{r}
+if (!dir.exists('final_plots')) {dir.create('final_plots')}
+```
 
 
 ```{r, echo=F,message=F,warning=F}
@@ -28,6 +37,11 @@ pacman::p_load(required_packages,
 ```
 
 ```{r}
+set.seed(42)
+```
+
+
+```{r}
 sessionInfo()
 ```
 
@@ -36,17 +50,17 @@ sessionInfo()
 
 
 ```{r}
-df = read.csv('https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/data_total_study3.csv')
+github_link = 'https://raw.githubusercontent.com/mertensu/thinking-in-ratios/master/'
+file_name = 'data_total_study3.csv' 
+df = read.csv(paste0(github_link, file_name))
 ```
 
 ## Preprocessing
 
 
-
 ```{r}
 # replace zero ratings with 0.001
 df[df$redness_rating == 0, 'redness_rating'] = 0.001
-# df = df[df$redness_rating!=0, ]
 
 
 # compute correct binary choice
@@ -266,6 +280,7 @@ prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
   pow_standard_plot = pp_check(power_law_standard) +
     labs(title = 'Power law', y = 'Standard method') +
     scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    scale_y_continuous(limits = c(0, 7)) +
     theme(
       plot.title = element_text(hjust = 0.5),
       legend.position = c(0.9, 0.9)
@@ -318,6 +333,7 @@ prior_settings = c(
 (
   lin_standard_plot = pp_check(linear_standard) + labs(title = 'Linear model') + 
     scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    scale_y_continuous(limits = c(0, 7)) +
     theme(
       plot.title = element_text(hjust = 0.5),
       legend.position = c(0.9, 0.9)
@@ -392,6 +408,7 @@ prior_settings <- c(set_prior('normal(0, 5)', nlpar = "a"),
 (
   pow_unidirectional_plot = pp_check(power_law_unidirectional) +
     scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+    scale_y_continuous(limits = c(0, 7)) +
     labs(y = 'Unidirectional method') +
     theme(legend.position = c(0.9, 0.9))
 ) 
@@ -444,6 +461,7 @@ prior_settings = c(
 ```{r}
 (lin_unidirectional_plot = pp_check(linear_unidirectional) +
    scale_x_continuous(labels=c(0,20,40,60), breaks=c(0,0.2,0.4,0.6)) + 
+   scale_y_continuous(limits = c(0, 7)) +
    theme(legend.position = c(0.9, 0.9)))
 ```
 
