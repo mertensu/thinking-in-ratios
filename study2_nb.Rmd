@@ -185,6 +185,7 @@ scaleFUN <- function(x)
   sprintf("%.1f", x)
 
 grid = data.frame(emmeans(fit,  ~ cd_factor + condition))
+grid$condition = factor(grid$condition,levels=c('unidirectional', 'standard'))
 
 ggplot(grid, aes(
   x = cd_factor,
@@ -209,7 +210,6 @@ ggplot(grid, aes(
   scale_color_manual(
     values = c("darkgrey", "black"),
     name = "method",
-    labels = c("unidirectional", "standard")
   ) +
   scale_x_discrete(labels = substring(grid$cd_factor, 2)) +
   theme_classic() +
